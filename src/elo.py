@@ -5,6 +5,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data" / "processed"
 
 INITIAL_RATING = 1500.0
+TEAM_ALIASES = {"Czech Republic": "Czechia"}
 HOME_ADVANTAGE = 100.0
 
 CONTINENTAL_FINALS = {
@@ -34,6 +35,7 @@ def goal_multiplier(goal_diff: int) -> float:
 
 def compute_elo(results: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """Devuelve, por partido, el Elo de cada equipo ANTES de jugarse."""
+    results = results.replace({"home_team": TEAM_ALIASES, "away_team": TEAM_ALIASES})
     results = results.sort_values("date").reset_index(drop=True)
     ratings = {}
     home_pre, away_pre = [], []

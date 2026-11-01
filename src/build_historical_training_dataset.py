@@ -9,11 +9,6 @@ DATA_DIR = ROOT_DIR / "data" / "processed"
 # Cargar datasets
 # ==========================
 
-ranking = pd.read_csv(
-    DATA_DIR / "fifa_world_ranking_clean.csv",
-    parse_dates=["rank_date"]
-)
-
 results = pd.read_csv(
     DATA_DIR / "results_historical_clean.csv",
     parse_dates=["date"]
@@ -65,99 +60,24 @@ world_cup = world_cup[
 print(world_cup.shape)
 print(world_cup["year"].value_counts().sort_index())
 
-country_mapping = {
-    "USA": "United States",
-    "IR Iran": "Iran",
-    "Korea Republic": "South Korea",
-    "Korea DPR": "North Korea",
-    "Congo DR": "DR Congo",
-    "Côte d'Ivoire": "Ivory Coast",
-    "Curacao": "Curaçao",
-    "Cabo Verde": "Cape Verde",
-    "Cape Verde Islands": "Cape Verde",
-    "Czech Republic": "Czechia",
-    "Türkiye": "Turkey"
-}
-
-ranking["country_full"] = ranking["country_full"].replace(country_mapping)
-
-print()
-
-print("Ranking:", ranking.shape)
-print("ELO:", elo.shape)
-
-print()
-
-print(ranking.columns.tolist())
-print(elo.columns.tolist())
-
-
 # ==========================================================
-# Ranking FIFA del mismo año del Mundial
+# ELO: último snapshot anterior a la fecha del partido
 # ==========================================================
 
-ranking["year"] = ranking["rank_date"].dt.year
+world_cup = world_cup.sort_values("date").reset_index(drop=True)
+elo_sorted = elo.sort_values("snapshot_date")
 
-ranking_latest = (
-    ranking
-    .sort_values("rank_date")
-    .groupby(["country_full", "year"], as_index=False)
-    .last()
-)
-
-print(ranking_latest.shape)
-
-world_cup = world_cup.merge(
-    ranking_latest.add_prefix("home_"),
-    left_on=["home_team", "year"],
-    right_on=["home_country_full", "home_year"],
-    how="left"
-)
-
-print("Después HOME:", world_cup.shape)
-
-world_cup = world_cup.merge(
-    ranking_latest.add_prefix("away_"),
-    left_on=["away_team", "year"],
-    right_on=["away_country_full", "away_year"],
-    how="left"
-)
-
-print("Después AWAY:", world_cup.shape)
-
-print(world_cup.head())
-
-
-# ==========================================================
-# ELO del mismo año
-# ==========================================================
-
-elo_latest = (
-    elo
-    .sort_values("snapshot_date")
-    .groupby(["country", "year"], as_index=False)
-    .last()
-)
-
-print(elo_latest.shape)
-
-world_cup = world_cup.merge(
-    elo_latest.add_prefix("home_"),
-    left_on=["home_team", "year"],
-    right_on=["home_country", "home_year"],
-    how="left"
-)
-
-print("Después HOME ELO:", world_cup.shape)
-
-world_cup = world_cup.merge(
-    elo_latest.add_prefix("away_"),
-    left_on=["away_team", "year"],
-    right_on=["away_country", "away_year"],
-    how="left"
-)
-
-print("Después AWAY ELO:", world_cup.shape)
+for side in ["home", "away"]:
+    world_cup = pd.merge_asof(
+        world_cup,
+        elo_sorted.add_prefix(f"{side}_"),
+        left_on="date",
+        right_on=f"{side}_snapshot_date",
+        left_by=f"{side}_team",
+        right_by=f"{side}_country",
+        direction="backward",
+        allow_exact_matches=False,
+    )
 
 print(world_cup.head())
 
@@ -182,20 +102,7 @@ world_cup = world_cup.drop(
 # Variables diferenciales
 # ==========================================
 
-world_cup["rank_diff"] = (
-    world_cup["away_rank_x"] -
-    world_cup["home_rank_x"]
-)
-
-world_cup["points_diff"] = (
-    world_cup["home_total_points"] -
-    world_cup["away_total_points"]
-)
-
-world_cup["rank_change_diff"] = (
-    world_cup["home_rank_change"] -
-    world_cup["away_rank_change"]
-)
+world_cup["rank_diff"] = world_cup["away_rank"] - world_cup["home_rank"]
 
 world_cup["elo_diff"] = (
     world_cup["home_rating"] -
@@ -257,22 +164,7 @@ print(
     )
 )
 
-print("\nEquipos HOME sin Ranking:")
-print(
-    sorted(
-        world_cup.loc[
-            world_cup["home_total_points"].isna(),
-            "home_team"
-        ].unique()
-    )
-)
-
-print("\nEquipos AWAY sin Ranking:")
-print(
-    sorted(
-        world_cup.loc[
-            world_cup["away_total_points"].isna(),
-            "away_team"
-        ].unique()
-    )
-)
+for side in ["home", "away"]:
+    print(side, "snapshot posterior al partido:",
+          (world_cup[f"{side}_snapshot_date"] > world_cup["date"]).mean())
+print(world_cup[["home_rating", "away_rating"]].isna().sum())

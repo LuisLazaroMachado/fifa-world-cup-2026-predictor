@@ -1,170 +1,38 @@
 from pathlib import Path
 import pandas as pd
 
+from elo import compute_elo
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT_DIR / "data" / "processed"
 
-# ==========================
-# Cargar datasets
-# ==========================
+TRAIN_START = "1990-01-01"
+WC2026_START = "2026-06-11"
 
-results = pd.read_csv(
-    DATA_DIR / "results_historical_clean.csv",
-    parse_dates=["date"]
-)
+results = pd.read_csv(DATA_DIR / "results_historical_clean.csv", parse_dates=["date"])
 
-elo = pd.read_csv(
-    DATA_DIR / "elo_ratings_wc2026_clean.csv",
-    parse_dates=["snapshot_date"]
-)
+# Elo con TODO el historial (necesita "calentarse"); luego se recorta.
+matches, _ = compute_elo(results)
 
-# ==========================
-# Solo partidos de Mundial
-# ==========================
-
-world_cup = results[
-    results["tournament"] == "FIFA World Cup"
+matches = matches[
+    (matches["date"] >= TRAIN_START) & (matches["date"] < WC2026_START)
 ].copy()
 
-world_cup["date"] = pd.to_datetime(world_cup["date"])
+matches["target"] = 2
+matches.loc[matches["home_score"] > matches["away_score"], "target"] = 1
+matches.loc[matches["home_score"] < matches["away_score"], "target"] = 0
 
-world_cup["year"] = world_cup["date"].dt.year
+matches["elo_diff"] = matches["home_elo_pre"] - matches["away_elo_pre"]
+matches["neutral"] = matches["neutral"].astype(int)
 
-print(world_cup.shape)
-print(world_cup["year"].value_counts().sort_index())
+cols = ["date", "home_team", "away_team", "tournament", "neutral",
+        "home_elo_pre", "away_elo_pre", "elo_diff", "target"]
+matches[cols].to_csv(DATA_DIR / "training_matches.csv", index=False)
 
-# ==========================
-# Crear target
-# ==========================
-
-world_cup["target"] = 2
-
-world_cup.loc[
-    world_cup["home_score"] > world_cup["away_score"],
-    "target"
-] = 1
-
-world_cup.loc[
-    world_cup["home_score"] < world_cup["away_score"],
-    "target"
-] = 0
-
-print(world_cup[["year","home_team","away_team","target"]].head())
-
-world_cup = world_cup[
-    (world_cup["year"] >= 1994) &
-    (world_cup["year"] < 2026)
-].reset_index(drop=True)
-
-print(world_cup.shape)
-print(world_cup["year"].value_counts().sort_index())
-
-# ==========================================================
-# ELO: último snapshot anterior a la fecha del partido
-# ==========================================================
-
-world_cup = world_cup.sort_values("date").reset_index(drop=True)
-elo_sorted = elo.sort_values("snapshot_date")
-
-for side in ["home", "away"]:
-    world_cup = pd.merge_asof(
-        world_cup,
-        elo_sorted.add_prefix(f"{side}_"),
-        left_on="date",
-        right_on=f"{side}_snapshot_date",
-        left_by=f"{side}_team",
-        right_by=f"{side}_country",
-        direction="backward",
-        allow_exact_matches=False,
-    )
-
-print(world_cup.head())
-
-# ==========================================================
-# Limpiar columnas auxiliares
-# ==========================================================
-
-drop_columns = [
-    "home_country_full",
-    "home_year",
-    "away_country_full",
-    "away_year",
-    "home_country",
-    "away_country"
-]
-
-world_cup = world_cup.drop(
-    columns=[c for c in drop_columns if c in world_cup.columns]
-)
-
-# ==========================================
-# Variables diferenciales
-# ==========================================
-
-world_cup["rank_diff"] = world_cup["away_rank"] - world_cup["home_rank"]
-
-world_cup["elo_diff"] = (
-    world_cup["home_rating"] -
-    world_cup["away_rating"]
-)
-
-world_cup["win_rate_diff"] = (
-    world_cup["home_wins"] /
-    (world_cup["home_matches_total"] + 1)
-) - (
-    world_cup["away_wins"] /
-    (world_cup["away_matches_total"] + 1)
-)
-
-world_cup["goal_diff_diff"] = (
-    (world_cup["home_goals_for"] - world_cup["home_goals_against"]) -
-    (world_cup["away_goals_for"] - world_cup["away_goals_against"])
-)
-
-world_cup["host_advantage"] = (
-    world_cup["home_is_host"].fillna(0) -
-    world_cup["away_is_host"].fillna(0)
-)
-
-print("\nDataset final:", world_cup.shape)
-
-print("\nNulos:")
-print(world_cup.isnull().sum().sort_values(ascending=False).head(30))
-
-# ==========================================================
-# Guardar dataset
-# ==========================================================
-
-world_cup.to_csv(
-    DATA_DIR / "historical_training_dataset.csv",
-    index=False
-)
-
-print("\nDataset guardado en:")
-print(DATA_DIR / "historical_training_dataset.csv")
-
-print("\nEquipos HOME sin ELO:")
-print(
-    sorted(
-        world_cup.loc[
-            world_cup["home_rating"].isna(),
-            "home_team"
-        ].unique()
-    )
-)
-
-print("\nEquipos AWAY sin ELO:")
-print(
-    sorted(
-        world_cup.loc[
-            world_cup["away_rating"].isna(),
-            "away_team"
-        ].unique()
-    )
-)
-
-for side in ["home", "away"]:
-    print(side, "snapshot posterior al partido:",
-          (world_cup[f"{side}_snapshot_date"] > world_cup["date"]).mean())
-print(world_cup[["home_rating", "away_rating"]].isna().sum())
+print("Filas:", len(matches))
+print("Rango de fechas:", matches["date"].min().date(), "->", matches["date"].max().date())
+print("\nDistribución del target (1=local, 2=empate, 0=visitante):")
+print(matches["target"].value_counts(normalize=True).round(3))
+print("\nNulos:", matches[cols].isna().sum().sum())
+wc = matches[matches["tournament"] == "FIFA World Cup"]
+print("Partidos de Mundial incluidos:", len(wc), "| años:", sorted(wc["date"].dt.year.unique()))

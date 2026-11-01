@@ -3,6 +3,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import base64
 
 # ==========================================================
 # CONFIGURACIÓN
@@ -148,7 +149,8 @@ with inicio:
     hero1, hero2 = st.columns([1,3])
 
     with hero1:
-        st.image("dashboard/world_cup.png", width=230)
+        img_b64 = base64.b64encode((ROOT / "dashboard" / "world_cup.jpg").read_bytes()).decode()
+        st.markdown(f'<img src="data:image/jpeg;base64,{img_b64}" width="230">', unsafe_allow_html=True)
 
     with hero2:
 
@@ -174,7 +176,7 @@ Predicción completa del Mundial FIFA 2026 utilizando:
     with m1:
         st.metric(
             "🏆 Predicted Champion",
-            champion.iloc[0,0]
+            top10.iloc[0]["team"]
         )
 
     with m2:
@@ -253,7 +255,7 @@ Champion Prediction
 
         st.plotly_chart(
             fig,
-            use_container_width=True
+            width="stretch"
         )
 
     st.divider()
@@ -377,7 +379,7 @@ with grupos_tab:
 
     st.dataframe(
         q,
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )
 

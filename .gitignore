@@ -7,4 +7,6 @@ __pycache__/
 .venv*/
 venv/
 data/processed/training_matches.csv
-
+*.pkl
+.venv*/
+.DS_Store

@@ -3,786 +3,119 @@ from pathlib import Path
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-import base64
 
-# ==========================================================
-# CONFIGURACIÓN
-# ==========================================================
-
-st.set_page_config(
-    page_title="FIFA World Cup 2026 Predictor",
-    page_icon="🏆",
-    layout="wide"
-)
+st.set_page_config(page_title="FIFA World Cup 2026 Predictor", page_icon="🏆", layout="wide")
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data" / "processed"
 
-# ==========================================================
-# ESTILOS
-# ==========================================================
+N_SIMS = 10_000  # debe coincidir con N_SIMS de src/simulate.py
 
-st.markdown("""
-<style>
+# Resultado real del torneo (fuente: Wikipedia, "2026 FIFA World Cup knockout stage")
+REAL_RESULT = {"Spain": "Champion", "Argentina": "Runner-up", "England": "3rd place", "France": "4th place"}
 
-.block-container{
-    padding-top:1rem;
+STAGE_NAMES = {
+    "R32": "Round of 32", "R16": "Round of 16", "QF": "Quarterfinals",
+    "SF": "Semifinals", "Final": "Final", "Champion": "Champion",
 }
 
-div[data-testid="metric-container"]{
-    border-radius:15px;
-    border:1px solid #dddddd;
-    padding:15px;
-    box-shadow:0px 2px 8px rgba(0,0,0,.08);
-}
 
-.match-card{
+@st.cache_data
+def load_data():
+    sim = pd.read_csv(DATA / "simulation_results.csv")
+    evaluation = pd.read_csv(DATA / "evaluation_wc2026.csv")
+    groups = pd.read_csv(DATA / "world_cup_groups.csv")
+    return sim.merge(groups, on="team"), evaluation
 
-    border-radius:18px;
 
-    padding:20px;
+sim, evaluation = load_data()
+sim = sim.sort_values("Champion", ascending=False).reset_index(drop=True)
+favorite = sim.iloc[0]
+real_champion = next(t for t, r in REAL_RESULT.items() if r == "Champion")
+top4_are_semifinalists = set(sim.head(4)["team"]) == set(REAL_RESULT)
 
-    border:1px solid #d8d8d8;
-
-    margin-bottom:15px;
-
-    background:white;
-
-    box-shadow:0px 3px 10px rgba(0,0,0,.05);
-}
-
-.round-title{
-
-    color:#003366;
-
-    font-size:30px;
-
-    font-weight:bold;
-
-    margin-top:25px;
-}
-
-.team-win{
-
-    color:#1b8d2d;
-
-    font-weight:bold;
-
-    font-size:20px;
-}
-
-.team-lose{
-
-    color:#cc2222;
-
-    font-size:18px;
-}
-
-.group-card{
-
-    border-radius:15px;
-
-    border:1px solid #dddddd;
-
-    padding:15px;
-
-    margin-bottom:15px;
-
-    background:#fafafa;
-}
-
-.small-title{
-
-    color:#003366;
-
-    font-size:22px;
-
-    font-weight:bold;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# ==========================================================
-# CARGA DE DATOS
-# ==========================================================
-
-groups = pd.read_csv(DATA / "world_cup_groups.csv")
-
-qualified = pd.read_csv(DATA / "qualified_teams.csv")
-
-round32 = pd.read_csv(DATA / "round_of_32.csv")
-
-round16 = pd.read_csv(DATA / "round16_matches.csv")
-
-quarter = pd.read_csv(DATA / "quarter_matches.csv")
-
-semi = pd.read_csv(DATA / "semifinal_matches.csv")
-
-final = pd.read_csv(DATA / "final_match.csv")
-
-champion = pd.read_csv(DATA / "champion.csv")
-
-top10 = pd.read_csv(DATA / "top10_champions.csv")
-
-# ==========================================================
-# TABS
-# ==========================================================
-
-inicio, grupos_tab, knockout, probabilidades = st.tabs(
-
-[
-"🏠 Home",
-"⚽ Group Stage",
-"🏆 Knockout",
-"📊 Monte Carlo"
-]
-
+st.title("🏆 FIFA World Cup 2026 Predictor")
+st.caption(
+    "Pre-tournament forecast built with Elo ratings, a logistic regression and "
+    f"a Monte Carlo simulation of {N_SIMS:,} tournaments."
 )
 
-# ==========================================================
-# HOME
-# ==========================================================
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Model favorite", favorite["team"])
+c2.metric("Title probability", f"{favorite['Champion'] * 100:.1f}%")
+c3.metric("Real champion", real_champion)
+c4.metric("Simulations", f"{N_SIMS:,}")
 
-with inicio:
+tab_forecast, tab_reality, tab_method = st.tabs(["📊 Forecast", "🔍 Model vs reality", "🧪 Methodology"])
 
-    hero1, hero2 = st.columns([1,3])
+# ----------------------------------------------------------------------------
+with tab_forecast:
+    st.subheader("Probability of winning the World Cup")
+    top = sim.head(15).assign(pct=lambda d: d["Champion"] * 100).iloc[::-1]
+    fig = px.bar(top, x="pct", y="team", orientation="h", text=top["pct"].map("{:.1f}%".format))
+    fig.update_layout(height=520, xaxis_title="Probability (%)", yaxis_title=None, margin=dict(l=0, r=0, t=10, b=0))
+    fig.update_traces(textposition="outside")
+    st.plotly_chart(fig, width="stretch")
 
-    with hero1:
-        img_b64 = base64.b64encode((ROOT / "dashboard" / "world_cup.jpg").read_bytes()).decode()
-        st.markdown(f'<img src="data:image/jpeg;base64,{img_b64}" width="230">', unsafe_allow_html=True)
+    st.subheader("Probability of reaching each round (all 48 teams)")
+    table = sim[["team", "group", *STAGE_NAMES]].copy()
+    table[list(STAGE_NAMES)] = (table[list(STAGE_NAMES)] * 100).round(1)
+    table = table.rename(columns={"team": "Team", "group": "Group", **STAGE_NAMES})
+    st.dataframe(table, hide_index=True, width="stretch")
 
-    with hero2:
-
-        st.title("🏆 FIFA World Cup 2026 Predictor")
-
-        st.markdown("""
-### Machine Learning World Cup Prediction System
-
-Predicción completa del Mundial FIFA 2026 utilizando:
-
-- 🌍 FIFA Rankings
-- 📈 ELO Ratings
-- ⚽ Historial internacional
-- 🤖 Random Forest
-- 🎲 Monte Carlo Simulation
-- 🏆 Tournament Bracket Prediction
-""")
-
-    st.divider()
-
-    m1,m2,m3,m4 = st.columns(4)
-
-    with m1:
-        st.metric(
-            "🏆 Predicted Champion",
-            top10.iloc[0]["team"]
-        )
-
-    with m2:
-        st.metric(
-            "🌎 Teams",
-            len(groups.team.unique())
-        )
-
-    with m3:
-        st.metric(
-            "🤖 Model",
-            "Random Forest"
-        )
-
-    with m4:
-        st.metric(
-            "🎲 Simulations",
-            f"{int(top10.titles.sum())}"
-        )
-
-    st.divider()
-
-    left,right = st.columns([2,1])
-
-    with left:
-
-        st.subheader("Prediction Pipeline")
-
-        st.code("""
-Historical Matches
-        │
-        ▼
-Feature Engineering
-        │
-        ▼
-Random Forest
-        │
-        ▼
-Match Probabilities
-        │
-        ▼
-Knockout Simulation
-        │
-        ▼
-Monte Carlo (500 tournaments)
-        │
-        ▼
-Champion Prediction
-""")
-
-    with right:
-
-        favorite = top10.sort_values(
-            "probability",
-            ascending=False
-        ).iloc[0]
-
-        st.subheader("🏆 Favorite")
-
-        st.metric(
-            favorite.team,
-            f"{favorite.probability*100:.2f}%"
-        )
-
-        fig = px.pie(
-            top10.head(5),
-            values="probability",
-            names="team",
-            hole=.60
-        )
-
-        fig.update_layout(
-            height=330,
-            margin=dict(l=0,r=0,t=0,b=0)
-        )
-
-        st.plotly_chart(
-            fig,
-            width="stretch"
-        )
-
-    st.divider()
-
-    st.subheader("Tournament Overview")
-
-    c1,c2,c3,c4,c5 = st.columns(5)
-
-    c1.metric("Group Stage","48 Teams")
-    c2.metric("Round of 32","32 Teams")
-    c3.metric("Quarterfinals","8 Teams")
-    c4.metric("Semifinals","4 Teams")
-    c5.metric("Champion","1 Team")
-    
-
-# ==========================================================
-# GROUP STAGE
-# ==========================================================
-
-with grupos_tab:
-
-    st.title("⚽ FIFA World Cup Group Stage")
-
+# ----------------------------------------------------------------------------
+with tab_reality:
+    st.subheader("Forecast vs what actually happened")
+    rows = []
+    for team, result in REAL_RESULT.items():
+        r = sim[sim["team"] == team].iloc[0]
+        rows.append({
+            "Team": team,
+            "Real result": result,
+            "Model rank (title odds)": int(sim.index[sim["team"] == team][0]) + 1,
+            "P(semifinal)": f"{r['SF'] * 100:.1f}%",
+            "P(final)": f"{r['Final'] * 100:.1f}%",
+            "P(champion)": f"{r['Champion'] * 100:.1f}%",
+        })
+    st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    if top4_are_semifinalists:
+        st.caption("The four most likely champions according to the model were the four real semifinalists.")
     st.caption(
-        "Qualification probabilities predicted by the Random Forest model."
+        f"One tournament is a single sample: a {favorite['Champion'] * 100:.0f}% favorite "
+        "is expected to win only about 1 in 5 times."
     )
 
-    st.divider()
-
-    qualified_set = set(qualified["team"])
-
-    # ===========================
-    # Probabilidad aproximada
-    # ===========================
-
-    team_prob = {}
-
-    if "group_probability.csv" in [f.name for f in DATA.glob("*.csv")]:
-
-        probs = pd.read_csv(DATA/"group_probability.csv")
-
-        for _,r in probs.iterrows():
-
-            team_prob[r.team] = r.probability
-
-    else:
-
-        # Si aún no existe el archivo,
-        # usamos una aproximación visual
-
-        for g in groups.group.unique():
-
-            teams_group = groups.loc[
-                groups.group==g,
-                "team"
-            ].tolist()
-
-            base = [90,70,40,15]
-
-            for t,p in zip(teams_group,base):
-
-                team_prob[t]=p
-
-    # ===========================
-    # Mostrar grupos
-    # ===========================
-
-    groups_list = sorted(groups.group.unique())
-
-    for i in range(0,len(groups_list),3):
-
-        cols = st.columns(3)
-
-        for j in range(3):
-
-            if i+j>=len(groups_list):
-                continue
-
-            group = groups_list[i+j]
-
-            with cols[j]:
-
-                st.markdown(
-                    f"## 🏆 Group {group}"
-                )
-
-                gteams = groups.loc[
-                    groups.group==group,
-                    "team"
-                ]
-
-                for team in gteams:
-
-                    prob = team_prob.get(team,50)
-
-                    if team in qualified_set:
-
-                        color="🟢"
-
-                    else:
-
-                        color="🔴"
-
-                    st.markdown(
-                        f"### {color} {team}"
-                    )
-
-                    st.progress(prob/100)
-
-                    st.write(
-                        f"Qualification probability **{prob:.1f}%**"
-                    )
-
-                st.divider()
-
-    st.header("Qualified Teams")
-
-    q = qualified.copy()
-
-    q.index=q.index+1
-
-    st.dataframe(
-        q,
-        width="stretch",
-        hide_index=True
-    )
-
-# ==========================================================
-# KNOCKOUT STAGE
-# ==========================================================
-
-with knockout:
-
-    st.title("🏆 FIFA World Cup 2026 Knockout Bracket")
-
+    st.subheader("Match-level accuracy")
+    ev = evaluation.rename(columns={"model": "Model", "accuracy": "Accuracy", "log_loss": "Log loss"})
+    st.dataframe(ev, hide_index=True, width="stretch")
     st.caption(
-        "Knockout stage predicted by the Random Forest model."
+        "Computed on the 2026 World Cup matches available in the dataset (until July 4, 2026), "
+        "using ratings frozen before the tournament. Lower log loss is better."
     )
 
-    FLAGS = {
-        "Argentina":"🇦🇷",
-        "Australia":"🇦🇺",
-        "Austria":"🇦🇹",
-        "Belgium":"🇧🇪",
-        "Brazil":"🇧🇷",
-        "Colombia":"🇨🇴",
-        "Croatia":"🇭🇷",
-        "England":"🏴",
-        "France":"🇫🇷",
-        "Portugal":"🇵🇹",
-        "Spain":"🇪🇸",
-        "Mexico":"🇲🇽",
-        "Uruguay":"🇺🇾",
-        "Switzerland":"🇨🇭",
-        "Qatar":"🇶🇦",
-        "South Korea":"🇰🇷"
-    }
-
-    st.markdown("""
-
-<style>
-
-.bracket{
-
-    display:grid;
-
-    grid-template-columns:
-    300px
-    260px
-    220px
-    220px
-    220px;
-
-    gap:35px;
-
-    align-items:center;
-
-}
-
-
-.round{
-
-    display:flex;
-
-    flex-direction:column;
-
-    justify-content:center;
-
-}
-
-
-.round32 .match{
-    margin-bottom:18px;
-}
-
-
-.round16 .match{
-
-    margin-top:45px;
-    margin-bottom:45px;
-
-}
-
-
-.quarter .match{
-
-    margin-top:100px;
-    margin-bottom:100px;
-
-}
-
-
-.semi .match{
-
-    margin-top:180px;
-
-}
-
-
-.final .match{
-
-    margin-top:350px;
-
-}
-
-.round{
-    display:flex;
-    flex-direction:column;
-}
-
-.round-title{
-    text-align:center;
-    font-size:26px;
-    font-weight:bold;
-    color:#003366;
-    margin-bottom:18px;
-}
-
-.match{
-
-    background:white;
-
-    border-radius:12px;
-
-    border:1px solid #dcdcdc;
-
-    padding:12px;
-
-    margin-bottom:22px;
-
-    box-shadow:0 2px 8px rgba(0,0,0,.08);
-
-}
-
-.spacer{
-    height:55px;
-}
-
-.win{
-    color:#1a9c45;
-    font-weight:bold;
-}
-
-.lose{
-    color:#d62828;
-}
-
-.percent{
-    float:right;
-    font-weight:bold;
-}
-
-.round-title{
-
-font-size:28px;
-
-font-weight:bold;
-
-color:#003366;
-
-margin-bottom:25px;
-
-}
-
-.match{
-
-background:white;
-
-border-radius:12px;
-
-border:1px solid #d9d9d9;
-
-padding:12px;
-
-margin-bottom:18px;
-
-box-shadow:0 3px 8px rgba(0,0,0,.08);
-
-}
-
-.win{
-
-color:#18a558;
-
-font-weight:bold;
-
-font-size:17px;
-
-}
-
-.lose{
-
-color:#d62828;
-
-font-size:17px;
-
-}
-
-.percent{
-
-float:right;
-
-font-weight:bold;
-
-}
-
-.connector{
-
-height:18px;
-
-}
-
-</style>
-
-""", unsafe_allow_html=True)
-
-    def build_match(row):
-
-        home = row.home_team
-        away = row.away_team
-
-        hp = float(row.home_probability)
-        ap = float(row.away_probability)
-
-        winner = row.winner
-
-        home_class = "win" if winner == home else "lose"
-        away_class = "win" if winner == away else "lose"
-
-        return f"""
-    <div class="match">
-
-    <div class="{home_class}">
-    {FLAGS.get(home,"🏳️")} {home}
-    <span class="percent">{hp:.1f}%</span>
-    </div>
-
-    <hr style="margin:8px 0;">
-
-    <div class="{away_class}">
-    {FLAGS.get(away,"🏳️")} {away}
-    <span class="percent">{ap:.1f}%</span>
-    </div>
-
-    </div>
-    """
-
-    html = """
-    <div class="bracket">
-
-    <div>
-
-    <div class="round-title">
-    Round of 32
-    </div>
-    """
-
-    for _, r in round32.iterrows():
-        html += build_match(r)
-
-    html += """
-    </div>
-
-    <div>
-
-    <div class="round-title">
-    Quarterfinals
-    </div>
-    """
-
-    for _, r in quarter.iterrows():
-        html += build_match(r)
-
-    html += """
-    </div>
-
-    <div>
-
-    <div class="round-title">
-    Semifinals
-    </div>
-    """
-
-    for _, r in semi.iterrows():
-        html += build_match(r)
-
-    html += """
-    </div>
-
-    <div>
-
-    <div class="round-title">
-    Final
-    </div>
-    """
-
-    html += build_match(final.iloc[0])
-
-    winner = final.iloc[0].winner
-
-    html += f"""
-
-    <br><br>
-
-    <div style="
-    background:#0E9F4B;
-    color:white;
-    padding:18px;
-    border-radius:15px;
-    text-align:center;
-    font-size:22px;
-    font-weight:bold;
-    ">
-
-    🏆 WORLD CHAMPION
-
-    <br><br>
-
-    {FLAGS.get(winner,"🏳️")} {winner}
-
-    </div>
-
-    </div>
-
-    </div>
-    """
-
-    st.markdown(html, unsafe_allow_html=True)
-
-# ==========================================================
-# MONTE CARLO
-# ==========================================================
-
-with probabilidades:
-
-    st.title("📊 Monte Carlo Simulation")
-
-    st.write(
-        "Champion probabilities obtained after simulating the complete tournament hundreds of times."
-    )
-
-    st.divider()
-
-    top10_display = top10.copy()
-
-    top10_display["probability"] = (
-        top10_display["probability"] * 100
-    ).round(2)
-
-    top10_display = top10_display.rename(
-        columns={
-            "team": "Team",
-            "titles": "Titles",
-            "probability": "Probability (%)"
-        }
-    )
-
-    favorite = top10_display.iloc[0]
-
-    c1, c2 = st.columns([1, 2])
-
-    with c1:
-
-        st.metric(
-            "🏆 Favorite",
-            favorite["Team"]
-        )
-
-        st.metric(
-            "Winning Probability",
-            f'{favorite["Probability (%)"]:.2f}%'
-        )
-
-    with c2:
-
-        fig = px.bar(
-            top10_display,
-            x="Team",
-            y="Probability (%)",
-            text="Probability (%)",
-            color="Probability (%)",
-            color_continuous_scale="Blues"
-        )
-
-        fig.update_layout(
-            height=500,
-            xaxis_title="National Team",
-            yaxis_title="Probability (%)",
-            showlegend=False
-        )
-
-        fig.update_traces(
-            texttemplate="%{text:.2f}%",
-            textposition="outside"
-        )
-
-        st.plotly_chart(
-            fig,
-            width="stretch"
-        )
-
-    st.divider()
-
-    st.subheader("Complete Ranking")
-
-    st.dataframe(
-        top10_display,
-        width="stretch",
-        hide_index=True
+# ----------------------------------------------------------------------------
+with tab_method:
+    st.markdown(
+        """
+### Pipeline
+1. **Data:** ~49,000 international results (1872-2026).
+2. **Elo ratings:** computed from scratch for every team (initial 1500, home advantage 100,
+   K = 60 World Cup / 40 qualifiers and continental finals / 30 other / 20 friendlies, goal-difference multiplier).
+   The rating used for each match is the one *before* it was played.
+3. **Model:** logistic regression (rating difference + neutral venue) trained on ~32,000 matches since 1990.
+4. **Simulation:** 12 groups, top 2 + 8 best third-placed teams, official round-of-32 bracket and
+   third-place assignment table (FIFA regulations, Annex C).
+
+### Validation
+- Temporal splits only (train on the past, test on the future).
+- 541 competitive matches of 2022: log loss 0.932 vs 1.049 for historical frequencies.
+- World Cups 2018 and 2022 (64 matches each): differences between models are within noise.
+- Richer models (recent form, gradient boosting) did **not** improve results, so the simple model was kept.
+
+### Assumptions and limitations
+- Group and third-place tie-breakers are random (the model predicts outcomes, not goals).
+- Knockout draws are resolved 50/50 (extra time and penalties).
+- Host advantage applies only in the group stage.
+- Ratings are not updated during the tournament; injuries and squads are not modelled.
+        """
     )

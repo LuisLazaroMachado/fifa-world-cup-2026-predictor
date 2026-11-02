@@ -1,0 +1,5 @@
+model,accuracy,log_loss
+Modelo (logística + Elo),0.667,0.85
+Gana el de mayor Elo,0.644,
+Siempre gana el local,0.489,
+Solo frecuencias históricas,,1.049

@@ -57,7 +57,7 @@ dashboard/app.py          Streamlit dashboard
 data/raw/                 source results + FIFA third-place table
 data/processed/           clean results, groups, ratings, simulation outputs
 models/                   trained model
-notebooks/eploration      data preparation(01_prepare_results) and archived 
+notebooks/                data preparation (01_prepare_results) and archived exploration
 src/
   elo.py                  Elo ratings (pre-match)
   features.py             rolling form features (tested, not used in the final model)

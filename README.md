@@ -81,3 +81,7 @@ src/
 ## Data and credits
 
 Match results: [International football results](https://github.com/martj42/international_results) by Mart Jürisoo. Third-place assignment table: FIFA World Cup 2026 Regulations, Annex C. Real tournament results: Wikipedia.
+
+## License
+
+MIT (see `LICENSE`). Match data keeps its original license; see the data source above.

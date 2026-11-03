@@ -33,6 +33,8 @@ On the 2026 matches, accuracy is 66.7% vs 64.4% for "the team with the higher El
 1. **Elo ratings** are computed from scratch from ~49,000 international results (1872-2026). The rating used for each match is the one *before* it was played, so there is no temporal leakage.
 2. **Model:** logistic regression on the rating difference and neutral venue, trained on ~32,000 matches since 1990. Richer variants (recent form, gradient boosting) were tested and did not improve results, so the simple model was kept.
 3. **Simulation:** 12 groups, top 2 plus the 8 best third-placed teams, the official round-of-32 bracket and FIFA's third-place assignment table (Annex C of the regulations).
+4. **Data decisions:** the FIFA ranking and an external Elo dataset were explored and discarded
+   (temporal leakage and incomplete team coverage). See `notebooks/archive/`.
 
 ## Run it
 
@@ -55,7 +57,7 @@ dashboard/app.py          Streamlit dashboard
 data/raw/                 source results + FIFA third-place table
 data/processed/           clean results, groups, ratings, simulation outputs
 models/                   trained model
-notebooks/                data preparation of the results dataset
+notebooks/eploration      data preparation(01_prepare_results) and archived 
 src/
   elo.py                  Elo ratings (pre-match)
   features.py             rolling form features (tested, not used in the final model)
